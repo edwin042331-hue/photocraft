@@ -200,7 +200,7 @@ fn plane_surface(vals: &[f32], r: Rect, fmt: PixelFormat) -> Surface {
 
 /// Make every canvas pixel of `s` explicit so filters and adjustments that work on the content
 /// bounds also see the untouched (default-valued) parts of a channel.
-fn materialize(s: &mut Surface, r: Rect) {
+pub(crate) fn materialize(s: &mut Surface, r: Rect) {
     let v = s.read_region(r);
     s.write_region(r, &v);
 }
@@ -566,6 +566,14 @@ pub(crate) fn inject_target(s: &Session, id: &str, params: Value) -> Value {
         ChannelTarget::Composite if st.doc.quick_mask.is_some() => json!("quickMask"),
         // Viewing the active layer's mask (⌥-click): pixel commands edit the mask.
         ChannelTarget::Composite if crate::mask_view_cmds::current(st).is_some() => json!("mask"),
+        // Non-pixel layers with a mask (e.g. adjustment layers): commands target the mask.
+        ChannelTarget::Composite
+            if st.active_layer
+                .and_then(|id| st.doc.layer(id))
+                .is_some_and(|l| l.surface().is_none() && l.mask.is_some()) =>
+        {
+            json!("mask")
+        }
         _ => return params,
     };
     match params {

@@ -10,6 +10,11 @@ use photocraft_raster::{Surface, from_rgba, to_rgba};
 /// selection; `mode` is the document's, for the tone transfer (e.g. Exposure in Grayscale).
 pub fn adjust_surface(s: &mut Surface, adj: &Adjustment, selection: Option<&Surface>, mode: photocraft_color::ColorMode) {
     let r = s.content_bounds();
+    adjust_surface_in_rect(s, r, adj, selection, mode);
+}
+
+/// Run an adjustment over a specific rectangle (e.g. document bounds for layer masks and channels).
+pub fn adjust_surface_in_rect(s: &mut Surface, r: Rect, adj: &Adjustment, selection: Option<&Surface>, mode: photocraft_color::ColorMode) {
     if r.is_empty() {
         return;
     }

@@ -498,3 +498,52 @@ fn apply_image_and_calculations_fail_gracefully_never_panic() {
     // A well-formed self-apply still works.
     assert!(s.execute("image.applyImage", json!({"source": {"channel": "composite"}})).is_ok());
 }
+
+#[test]
+fn layer_mask_invert_inverts_mask_and_leaves_pixels_intact() {
+    let mut s = session();
+    // Fill the layer with red pixels
+    s.execute("edit.fill", json!({"contents": "color", "color": "#ff0000"})).unwrap();
+    let before_px = px(&s, 5, 5);
+    assert_eq!(before_px[0], 1.0);
+
+    // Add a reveal-all layer mask (white / 1.0 everywhere)
+    s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+    let lid = s.active().unwrap().active_layer.unwrap();
+    let mask_val_before = s.active().unwrap().doc.layer(lid).unwrap().mask.as_ref().unwrap().surface.sample_channel(5, 5, 0);
+    assert_eq!(mask_val_before, 1.0);
+
+    // Invert the layer mask with target: "mask" (#780)
+    s.execute("image.adjustments.invert", json!({"target": "mask"})).unwrap();
+
+    // Verify mask is now inverted (0.0 / black)
+    let mask_val_after = s.active().unwrap().doc.layer(lid).unwrap().mask.as_ref().unwrap().surface.sample_channel(5, 5, 0);
+    assert_eq!(mask_val_after, 0.0);
+
+    // Verify layer RGB pixels were NOT inverted (still pure red!)
+    let after_px = px(&s, 5, 5);
+    assert_eq!(after_px, before_px);
+
+    // Invert again: returns to white
+    s.execute("image.adjustments.invert", json!({"target": "mask"})).unwrap();
+    let mask_val_restored = s.active().unwrap().doc.layer(lid).unwrap().mask.as_ref().unwrap().surface.sample_channel(5, 5, 0);
+    assert_eq!(mask_val_restored, 1.0);
+}
+
+#[test]
+fn adjustment_layer_mask_invert_succeeds_without_pixel_layer() {
+    let mut s = session();
+    // Create an adjustment layer (has no pixel surface)
+    s.execute("layer.newAdjustmentLayer.invert", json!({})).unwrap();
+    // Add a layer mask
+    s.execute("layer.layerMask.revealAll", json!({})).unwrap();
+    let lid = s.active().unwrap().active_layer.unwrap();
+    let l = s.active().unwrap().doc.layer(lid).unwrap();
+    assert!(l.surface().is_none(), "adjustment layer has no pixel surface");
+    assert!(l.mask.is_some(), "adjustment layer has a mask");
+
+    // Invert adjustment layer mask: auto-targets mask because layer has no pixel surface (#780)
+    s.execute("image.adjustments.invert", json!({})).unwrap();
+    let mask_val = s.active().unwrap().doc.layer(lid).unwrap().mask.as_ref().unwrap().surface.sample_channel(5, 5, 0);
+    assert_eq!(mask_val, 0.0);
+}

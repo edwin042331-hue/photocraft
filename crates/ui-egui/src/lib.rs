@@ -561,6 +561,20 @@ impl PhotocraftApp {
                 return Ok(serde_json::json!({"pasted": false}));
             }
         }
+        let mut params = params;
+        if self.ui.mask_target && params.get("target").is_none() {
+            if let Some(st) = self.session.active() {
+                if let Some(l) = st.active_layer.and_then(|id| st.doc.layer(id)) {
+                    if l.mask.is_some() {
+                        if let Value::Object(ref mut map) = params {
+                            map.insert("target".to_string(), serde_json::json!("mask"));
+                        } else if params.is_null() {
+                            params = serde_json::json!({"target": "mask"});
+                        }
+                    }
+                }
+            }
+        }
         // Long commands become background jobs when enabled (`jobs_ui`); the rest run inline.
         let r = jobs_ui::run(self, id, params);
         if r.is_ok() && matches!(id, "edit.copy" | "edit.cut" | "edit.copyMerged") {

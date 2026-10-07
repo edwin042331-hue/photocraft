@@ -41,12 +41,18 @@ fn has_pixel_layer(s: &Session) -> std::result::Result<(), String> {
     let l = crate::active_layer_of(s)?;
     if matches!(l.content, LayerContent::Raster(_)) { Ok(()) } else { Err(format!("active layer is a {} layer, not a pixel layer", l.content.kind_name())) }
 }
-/// A pixel layer, or a targeted alpha channel / Quick Mask (adjustments and fills apply to it).
+/// A pixel layer, or any layer with a mask (adjustments and fills apply to it or its mask),
+/// or a targeted alpha channel / Quick Mask.
 fn has_pixel_or_channel(s: &Session) -> std::result::Result<(), String> {
     if crate::channel_cmds::edits_channel(s) {
         return Ok(());
     }
-    has_pixel_layer(s)
+    let l = crate::active_layer_of(s)?;
+    if matches!(l.content, LayerContent::Raster(_)) || l.mask.is_some() {
+        Ok(())
+    } else {
+        Err(format!("active layer is a {} layer without a mask", l.content.kind_name()))
+    }
 }
 /// A layer that can be painted: pixels, or any layer with a mask (paint with `"target":"mask"`).
 pub(crate) fn has_paintable(s: &Session) -> std::result::Result<(), String> {
@@ -172,20 +178,28 @@ fn destructive_adjust(s: &mut Session, label: &str, adj: Adjustment, p: &Value) 
         // Alpha channel / Quick Mask target: the adjustment runs on the grayscale channel.
         return s.edit(label, |doc, _| {
             let sel = doc.selection.clone();
+            let b = doc.bounds();
             if let Some(surf) = crate::channel_cmds::channel_surface_for_filter(doc, p)? {
-                pixels::adjust_surface(surf, &adj, sel.as_ref(), ColorMode::Grayscale);
+                pixels::adjust_surface_in_rect(surf, b, &adj, sel.as_ref(), ColorMode::Grayscale);
                 surf.prune();
             }
             Ok(Value::Null)
         });
     }
-    let id = layer_param(s, &Value::Null)?;
+    let id = layer_param(s, p)?;
     s.edit(label, |doc, _| {
         let sel = doc.selection.clone();
-        let mode = doc.mode;
+        let mode = if is_mask_target(p) { ColorMode::Grayscale } else { doc.mode };
+        let b = doc.bounds();
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
-        let surf = l.surface_mut().ok_or_else(|| EngineError::Other("not a pixel layer".into()))?;
-        pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
+        let surf = paint_surface(l, p)?;
+        if is_mask_target(p) {
+            crate::channel_cmds::materialize(surf, b);
+            pixels::adjust_surface_in_rect(surf, b, &adj, sel.as_ref(), mode);
+            surf.prune();
+        } else {
+            pixels::adjust_surface(surf, &adj, sel.as_ref(), mode);
+        }
         Ok(())
     })?;
     Ok(Value::Null)
